@@ -25,10 +25,17 @@ def monitor_status():
 
 @router.post("/api/monitor/start")
 def start_monitor(req: StartRequest):
+    from api.services.training_service import training_service
+    if training_service.is_running:
+        raise HTTPException(status_code=409, detail="Wait for training to finish before monitoring.")
     if not model_service.is_loaded:
         raise HTTPException(status_code=400, detail="No model loaded. Load a model first.")
     if monitor_service.is_running:
         raise HTTPException(status_code=400, detail="Monitor already running.")
+    if model_service.preprocessor is None:
+        raise HTTPException(status_code=400, detail="The loaded model has no matching preprocessor.")
+    if not 0 <= req.threshold <= 1:
+        raise HTTPException(status_code=400, detail="Threshold must be between 0 and 1.")
 
     # Build the SHAP/LIME explainer (shared with on-demand explanations).
     # If no processed data is available, monitoring still runs — alerts just
@@ -175,6 +182,9 @@ def replay_dataset(n: int = 40, rate: float = 0.6,
     `full`    streams the whole dataset instead of a small balanced sample.
     `order`   "random" shuffles the flows; "sequential" keeps dataset order.
     """
+    from api.services.training_service import training_service
+    if training_service.is_running:
+        raise HTTPException(status_code=409, detail="Wait for training to finish before replay.")
     if monitor_service.is_running:
         raise HTTPException(status_code=400, detail="Monitor already running.")
 
@@ -245,6 +255,9 @@ def _ensure_model(target: Optional[str]):
 def remote_start(model: Optional[str] = Query(None), rate: float = Query(0.6)):
     """Start a 'live' monitoring session that is fed by the VM over the host-only network.
     Shown on the dashboard exactly like live capture on a network interface."""
+    from api.services.training_service import training_service
+    if training_service.is_running:
+        raise HTTPException(status_code=409, detail="Wait for training to finish before monitoring.")
     if monitor_service.is_running:
         raise HTTPException(status_code=400, detail="Monitor already running.")
     _ensure_model(model)
@@ -255,7 +268,7 @@ def remote_start(model: Optional[str] = Query(None), rate: float = Query(0.6)):
         logger.warning("Explainer unavailable for remote session: %s", e)
     monitor_service.start_remote(model_service.model, explainer,
                                  source_label="VMware Host-Only (Kali)", rate=rate)
-    return {"started": True, "mode": "live", "source": "VMware Host-Only (Kali)"}
+    return {"started": True, "mode": "remote", "source": "VMware Host-Only (Kali)"}
 
 
 @router.post("/api/monitor/ingest")
@@ -265,6 +278,11 @@ async def ingest_remote(file: UploadFile = File(...),
     and stream the flows through the live pipeline (detection + SHAP + attack type)."""
     import io
     import pandas as pd
+    from api.services.training_service import training_service
+    if training_service.is_running:
+        raise HTTPException(status_code=409, detail="Wait for training to finish before ingestion.")
+    if monitor_service.is_running and monitor_service.mode != "remote":
+        raise HTTPException(status_code=409, detail="Stop the current session before remote ingestion.")
 
     _ensure_model(model)
     if model_service.preprocessor is None:

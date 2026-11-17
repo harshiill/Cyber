@@ -24,6 +24,13 @@ logger = logging.getLogger(__name__)
 _REACT_BUILD = Path(__file__).parent.parent.parent / "web" / "dist"
 
 
+class SPAStaticFiles(StaticFiles):
+    async def get_response(self, path, scope):
+        if path in {"alerts", "explain", "train", "evaluate", "classify", "settings"}:
+            path = "index.html"
+        return await super().get_response(path, scope)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     loop = asyncio.get_event_loop()
@@ -67,7 +74,7 @@ def create_app() -> FastAPI:
     app.include_router(training_ws.router)
 
     if _REACT_BUILD.exists():
-        app.mount("/", StaticFiles(directory=str(_REACT_BUILD), html=True), name="static")
+        app.mount("/", SPAStaticFiles(directory=str(_REACT_BUILD), html=True), name="static")
 
     return app
 

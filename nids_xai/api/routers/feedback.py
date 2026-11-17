@@ -86,6 +86,12 @@ def submit_feedback(body: FeedbackBody):
         "label": body.label,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
+    from api.services.alert_store import alert_store
+    alert = alert_store.get_by_id(body.alert_id)
+    if alert and alert.get("features") is not None:
+        record.update(features=alert["features"], dataset=alert.get("model_dataset"),
+                      feature_names=alert.get("model_features", []),
+                      schema_id=alert.get("schema_id"), traffic_origin=alert.get("traffic_origin"))
     try:
         _append_feedback(record)
     except Exception as exc:

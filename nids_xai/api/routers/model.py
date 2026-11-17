@@ -21,10 +21,15 @@ def list_models():
 
 @router.post("/api/model/load")
 def load_model(req: LoadRequest):
+    from api.services.monitor_service import monitor_service
+    if monitor_service.is_running:
+        raise HTTPException(status_code=409, detail="Stop monitoring before switching models.")
     try:
         return model_service.load(req.filename)
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/api/model/feature-importance")

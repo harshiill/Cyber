@@ -45,7 +45,7 @@ def compute_risk_score(ml_score: float, rule_score: float) -> dict:
     ml_score = max(0.0, min(1.0, float(ml_score)))
     rule_score = max(0.0, min(1.0, float(rule_score)))
 
-    combined = RISK_WEIGHT_ML * ml_score + RISK_WEIGHT_RULE * rule_score
+    combined = max(rule_score, RISK_WEIGHT_ML * ml_score + RISK_WEIGHT_RULE * rule_score)
     score = int(round(combined * 100))
     score = max(0, min(100, score))
 

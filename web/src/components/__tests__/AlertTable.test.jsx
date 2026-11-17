@@ -23,7 +23,7 @@ describe('AlertTable', () => {
 
   it('filters to benign only', () => {
     render(<AlertTable alerts={ALERTS} selectedId={null} onSelect={vi.fn()} />)
-    fireEvent.click(screen.getByText('Benign'))
+    fireEvent.click(screen.getByRole('button', { name: 'Benign' }))
     expect(screen.getAllByText('BENIGN').length).toBe(1)
     expect(screen.queryByText('ATTACK')).toBeNull()
   })

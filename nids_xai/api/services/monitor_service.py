@@ -1,6 +1,7 @@
 import asyncio
 import datetime
 import logging
+import ipaddress
 import random
 import threading
 import time
@@ -49,7 +50,8 @@ def _normalise_event(raw: Dict) -> Dict:
         else None
     )
 
-    attack_prob = float(raw.get("confidence", 0.0))
+    ml_available = raw.get("confidence") is not None
+    attack_prob = float(raw.get("confidence") or 0.0)
     # Confidence in the decision actually reached: P(attack) for an attack,
     # P(benign) = 1 - P(attack) for a benign flow. Without this a confident
     # benign flow (P attack = 4%) would display as "4%" and drag the average down.
@@ -65,7 +67,10 @@ def _normalise_event(raw: Dict) -> Dict:
         "is_attack":  is_attack,
         "prediction": raw.get("prediction", "Unknown"),
         "attack_prob": attack_prob,
-        "confidence": decision_conf,
+        "confidence": decision_conf if ml_available else None,
+        "ml_available": ml_available,
+        "missing_features": raw.get("missing_features", []),
+        "ml_reason": raw.get("ml_reason"),
         "shap_top3":  shap_top3,
         "true_type":  raw.get("true_type"),
         "features":   raw.get("features"),
@@ -88,6 +93,8 @@ def _normalise_event(raw: Dict) -> Dict:
             risk = _compute_risk_score(attack_prob, rule_score)
 
             explanation: List[str] = []
+            if raw.get("ml_reason"):
+                explanation.append(raw["ml_reason"])
             for factor in shap_raw[:3]:
                 feature = factor.get("feature", "unknown")
                 direction = factor.get("direction", "attack")
@@ -130,12 +137,16 @@ class MonitorService:
         self._mode: Optional[str] = None
         self._source: Optional[str] = None
         self._start_time: Optional[float] = None
+        self._end_time: Optional[float] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
 
         self._alert_store = None
         self._alerts_manager = None
         self._stats_manager = None
 
+        self._source_history = {}
+        self._source_lock = threading.Lock()
+        self._traffic_origin = None
         self._traffic_lock = threading.Lock()
         self._traffic_buckets: deque = deque(maxlen=60)
         self._traffic_labels: deque = deque(maxlen=60)
@@ -175,8 +186,11 @@ class MonitorService:
         from src.monitor import NetworkMonitor
 
         self._mode = mode
+        self._traffic_origin = "live" if mode == "live" else "pcap_replay"
+        self._source_history.clear()
         self._source = pcap_path if mode == "replay" else interface
         self._start_time = time.time()
+        self._end_time = None
 
         self._monitor = NetworkMonitor(
             model=model,
@@ -192,10 +206,12 @@ class MonitorService:
                     self._monitor.start_replay(pcap_path)
                 else:
                     self._monitor.start_live(interface=interface)
+                self._monitor._capture_thread.join()
             except Exception as e:
                 self._on_event({"type": "monitor_error", "message": str(e)})
             finally:
                 self._running = False
+                self._end_time = time.time()
 
         self._running = True
         self._thread = threading.Thread(target=_run, daemon=True)
@@ -215,8 +231,11 @@ class MonitorService:
             return
 
         self._mode = "replay"
+        self._traffic_origin = "dataset_replay"
+        self._source_history.clear()
         self._source = "dataset replay"
         self._start_time = time.time()
+        self._end_time = None
         self._running = True
 
         def _run():
@@ -247,10 +266,10 @@ class MonitorService:
                     raw = {
                         "type": "monitor_event",
                         "timestamp": datetime.datetime.now().strftime("%H:%M:%S"),
-                        "src_ip": f"203.0.113.{random.randint(2, 254)}",
-                        "src_port": random.randint(1024, 65535),
-                        "dst_ip": "192.168.1.10",
-                        "dst_port": random.choice([80, 443, 22, 21, 3389, 8080]),
+                        "src_ip": None,
+                        "src_port": None,
+                        "dst_ip": None,
+                        "dst_port": None,
                         "protocol": "TCP",
                         "prediction": prediction,
                         "confidence": float(proba[1]),
@@ -265,6 +284,7 @@ class MonitorService:
                 logger.error("Dataset replay error: %s", e, exc_info=True)
             finally:
                 self._running = False
+                self._end_time = time.time()
                 self._broadcast(_normalise_event({"type": "monitor_replay_done"}), "alerts")
 
         self._thread = threading.Thread(target=_run, daemon=True)
@@ -294,10 +314,10 @@ class MonitorService:
         return {
             "type": "monitor_event",
             "timestamp": datetime.datetime.now().strftime("%H:%M:%S"),
-            "src_ip": f"192.168.179.{random.randint(2, 254)}",
-            "src_port": random.randint(1024, 65535),
-            "dst_ip": "192.168.179.1",
-            "dst_port": random.choice([80, 443, 22, 21, 3389, 8080]),
+            "src_ip": None,
+            "src_port": None,
+            "dst_ip": None,
+            "dst_port": None,
             "protocol": "TCP",
             "prediction": prediction,
             "confidence": float(proba[1]),
@@ -313,9 +333,12 @@ class MonitorService:
         if self._running:
             return False
         import queue
-        self._mode = "live"
+        self._mode = "remote"
+        self._traffic_origin = "remote_dataset"
+        self._source_history.clear()
         self._source = source_label
         self._start_time = time.time()
+        self._end_time = None
         self._running = True
         self._remote_rate = max(0.0, float(rate))
         self._remote_q = queue.Queue()
@@ -356,6 +379,7 @@ class MonitorService:
         if self._monitor:
             self._monitor.stop()
         self._running = False
+        self._end_time = time.time()
 
     def status(self) -> Dict:
         store_stats = self._alert_store.stats() if self._alert_store else {}
@@ -382,13 +406,17 @@ class MonitorService:
             labels = list(self._traffic_labels)
 
         return {
+            "running": self._running,
+            "mode": self._mode,
+            "source": self._source,
             "total_flows": total,
             "attacks": attacks,
             "benign": benign,
+            "unclassified": store_stats.get("unclassified", 0),
             "threat_rate": threat_rate,
             "avg_confidence": round(self._confidence_sum / self._flow_count, 4) if self._flow_count else 0.0,
             "active_flows": 0,
-            "uptime_seconds": int(time.time() - self._start_time) if self._start_time else 0,
+            "uptime_seconds": int((self._end_time or time.time()) - self._start_time) if self._start_time else 0,
             "packets_per_sec": 0,
             "traffic_history": history,
             "traffic_labels": labels,
@@ -396,24 +424,96 @@ class MonitorService:
 
     def _on_event(self, raw: Dict):
         """Called from the monitor thread. Must be thread-safe."""
+        raw = dict(raw)
+        origin = self._traffic_origin or ("live" if self._mode == "live" else self._mode)
+        if raw.get("type") == "monitor_event" and origin == "live" and raw.get("src_ip"):
+            now = time.monotonic()
+            ip = raw["src_ip"]
+            with self._source_lock:
+                for source in list(self._source_history):
+                    events = self._source_history[source]
+                    while events and events[0][0] < now - 60:
+                        events.popleft()
+                    if not events:
+                        del self._source_history[source]
+                if ip not in self._source_history and len(self._source_history) >= 1000:
+                    self._source_history.pop(next(iter(self._source_history)))
+                events = self._source_history.setdefault(ip, deque(maxlen=2000))
+                events.append((now, int(raw.get("dst_port") or 0)))
+                raw["distinct_dst_ports"] = len({port for _, port in events if port})
+                raw["connections_to_brute_ports"] = sum(port in (21, 22, 3389) for _, port in events)
+                raw["connections_per_second"] = sum(t >= now - 10 for t, _ in events) / 10.0
+
         normalised = _normalise_event(raw)
+        normalised["traffic_origin"] = origin
+        if normalised.get("matched_rules"):
+            normalised["is_attack"] = True
+            if normalised.get("prediction") == "Benign":
+                normalised["prediction"] = "Rule alert"
+        if normalised.get("features") is not None:
+            from api.services.model_service import model_service
+            from api.services.anomaly_service import anomaly_service
+            from src.training_data import preprocessing_id
+            if model_service.dataset:
+                anomaly = anomaly_service.predict([normalised["features"]], model_service.dataset,
+                                                  preprocessing_id(model_service.preprocessor))
+                if anomaly:
+                    normalised["anomaly"] = anomaly
+                    if anomaly["is_anomaly"]:
+                        normalised["explanation"].append(
+                            "This flow differs from the benign training examples; anomaly detection is not proof of an attack."
+                        )
+                        if not normalised["is_attack"]:
+                            normalised["is_attack"] = True
+                            normalised["prediction"] = "Anomaly"
+                            if normalised["risk_score"] < 40:
+                                normalised["risk_score"] = 40
+                                normalised["risk_level"] = "MEDIUM"
+        if raw.get("is_alert") and normalised.get("features") is not None:
+            from api.services.model_service import model_service
+            from api.services.type_classifier_service import type_classifier_service
+            if model_service.dataset:
+                import numpy as np
+                type_result = type_classifier_service.predict(
+                    np.asarray(normalised["features"]).reshape(1, -1), model_service.dataset
+                )
+                if type_result:
+                    normalised["attack_type"] = type_result["type"]
+                    normalised["attack_type_confidence"] = type_result["confidence"]
+        if origin == "live" and normalised.get("is_attack") and normalised.get("prediction") != "Anomaly" and normalised.get("risk_level") in ("HIGH", "CRITICAL"):
+            try:
+                ipaddress.ip_address(str(normalised.get("src_ip")))
+                from api.services.prevention_service import prevention_service
+                normalised["prevention"] = prevention_service.block_ip(
+                    normalised["src_ip"], f"{normalised['risk_level']} risk ({normalised['risk_score']}/100)"
+                )
+            except ValueError:
+                pass
 
         if normalised["kind"] in ("replay_done", "error"):
             self._broadcast(normalised, channel="alerts")
             if normalised["kind"] == "replay_done":
                 self._running = False
+                self._end_time = time.time()
             return
 
+        if normalised.get("features") is not None:
+            from api.services.model_service import model_service
+            normalised["model_dataset"] = model_service.dataset
+            normalised["model_features"] = list(model_service.feature_names)
+            from src.training_data import preprocessing_id
+            normalised["schema_id"] = preprocessing_id(model_service.preprocessor)
         alert = self._alert_store.push(normalised)
         # Don't broadcast the full feature vector — it's only needed server-side for LIME.
-        wire = {k: v for k, v in alert.items() if k != "features"}
+        wire = {k: v for k, v in alert.items() if k not in ("features", "model_features")}
         self._broadcast(wire, channel="alerts")
 
         with self._traffic_lock:
             # Average the confidence of the decision reached, not P(attack),
             # so a benign-heavy stream doesn't show a misleadingly low average.
-            self._confidence_sum += float(normalised.get("confidence", 0.0))
-            self._flow_count += 1
+            if normalised.get("confidence") is not None:
+                self._confidence_sum += float(normalised["confidence"])
+                self._flow_count += 1
             label = datetime.datetime.now().strftime("%H:%M:%S")
             if self._traffic_labels and self._traffic_labels[-1] == label:
                 self._traffic_buckets[-1] += 1

@@ -43,13 +43,13 @@ export default function TopBar({ running, mode, source }) {
           {theme === 'dark' ? '☀' : '☾'}
         </button>
         {running
-          ? <span title={`Live capture from ${source || ''}`}
+          ? <span title={`${mode === 'replay' ? 'Dataset replay' : mode === 'remote' ? 'Remote data' : 'Live capture'}: ${source || ''}`}
               style={{ display: 'flex', alignItems: 'center', gap: 6,
               background: 'var(--accent-light)', border: '1px solid var(--accent-border)',
               borderRadius: 'var(--radius-full)', padding: '5px 12px', fontSize: 11,
               fontWeight: 700, color: 'var(--accent)' }}>
               <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--accent)', animation: 'blink 1.2s infinite' }} />
-              MONITORING · {source || '…'}
+              {mode === 'replay' ? 'REPLAY' : mode === 'remote' ? 'REMOTE' : 'MONITORING'} · {source || '…'}
             </span>
           : <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>Idle</span>
         }

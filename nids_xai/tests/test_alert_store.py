@@ -46,3 +46,14 @@ def test_clear_empties_buffer(fresh_alert_store):
     removed = fresh_alert_store.clear()
     assert removed == 3
     assert fresh_alert_store.get() == []
+
+
+def test_unclassified_flows_are_not_counted_as_benign():
+    from api.services.alert_store import AlertStore
+
+    store = AlertStore()
+    store.push({'prediction': 'Unclassified', 'is_attack': False})
+    store.push({'prediction': 'Benign', 'is_attack': False})
+    stats = store.stats()
+    assert stats['benign'] == 1
+    assert stats['unclassified'] == 1

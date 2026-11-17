@@ -30,6 +30,7 @@ pillow>=9.0.0
 # PCAP Processing (for real attack testing)
 scapy>=2.4.5   # Requires Npcap on Windows: https://nmap.org/npcap/
 psutil>=5.9.0  # Network interface enumeration for live monitor
+PyYAML>=6.0  # YAML detection rules
 
 # Web Dashboard (FastAPI backend for React UI)
 fastapi>=0.111.0

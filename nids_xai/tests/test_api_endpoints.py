@@ -47,3 +47,13 @@ def test_evaluate_metrics_in_valid_range(api_client):
     for key in ("accuracy", "precision", "recall", "f1", "roc_auc", "specificity"):
         assert 0.0 <= body[key] <= 1.0, f"{key}={body[key]} out of [0,1]"
     assert body["tp"] + body["tn"] + body["fp"] + body["fn"] == body["test_samples"]
+
+
+def test_attack_breakdown_does_not_include_benign(api_client):
+    if not api_client.get('/api/model').json().get('loaded'):
+        pytest.skip('No model loaded')
+    response = api_client.post('/api/evaluate', json={})
+    if response.status_code == 404:
+        pytest.skip('No holdout data')
+    assert response.status_code == 200
+    assert all(str(row['attack']).strip().upper() != 'BENIGN' for row in response.json()['attack_breakdown'])

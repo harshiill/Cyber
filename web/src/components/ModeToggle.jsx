@@ -23,6 +23,15 @@ export default function ModeToggle({ onStarted, onStopped, running }) {
       .catch(() => { setIfaces([VM_IFACE]); setIface(VM_IFACE) })
   }, [])
 
+  useEffect(() => {
+    http.get('/model').then(({ data }) => {
+      if (data.dataset === '2017' || data.dataset === '2018') {
+        setReplayModel(data.dataset)
+        setReplayDs(data.dataset)
+      }
+    }).catch(() => {})
+  }, [])
+
   async function handleStart() {
     setErr(null)
     try {
@@ -66,7 +75,7 @@ export default function ModeToggle({ onStarted, onStopped, running }) {
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)' }}>Live capture on</span>
+      <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)' }}>Capture / remote input</span>
 
       {interfaces.length > 0 ? (
         <select value={iface} onChange={e => setIface(e.target.value)} disabled={running}
@@ -128,7 +137,7 @@ export default function ModeToggle({ onStarted, onStopped, running }) {
           <button onClick={handleReplay}
             title={isCross
               ? `Cross-dataset test: run the CIC-IDS${replayModel} model against CIC-IDS${replayDs} traffic to show cross-version generalisation, with live SHAP/LIME.`
-              : 'Stream real CIC-IDS flows through the live pipeline (detection + SHAP/LIME demo).'}
+              : 'Replay labeled dataset rows. IP addresses are not included.'}
             style={{ padding: '5px 16px', background: 'var(--surface)', color: 'var(--accent)',
               border: '1px solid var(--accent-border)', borderRadius: 6, fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
             ▶ Play Dataset

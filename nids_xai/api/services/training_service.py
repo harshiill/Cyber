@@ -61,13 +61,13 @@ class TrainingService:
         if ws in self._connections:
             self._connections.remove(ws)
 
-    def start(self, dataset: str, mode: str, model_service) -> bool:
+    def start(self, dataset: str, mode: str, model_service, source: str = "dataset") -> bool:
         if self._running:
             return False
         self._running = True
         self._stop_requested = False
         self._thread = threading.Thread(
-            target=self._run, args=(dataset, mode, model_service), daemon=True
+            target=self._run, args=(dataset, mode, model_service, source), daemon=True
         )
         self._thread.start()
         return True
@@ -101,7 +101,7 @@ class TrainingService:
             self._emit({"type": "error", "msg": "Training cancelled by user."})
             raise InterruptedError("training cancelled")
 
-    def _run(self, dataset: str, mode: str, model_service):
+    def _run(self, dataset: str, mode: str, model_service, source: str = "dataset"):
         try:
             import numpy as np
             from sklearn.model_selection import train_test_split
@@ -110,22 +110,33 @@ class TrainingService:
 
             self._emit({"type": "progress", "pct": 5, "msg": f"Loading {dataset} dataset…"})
 
-            npz_path = _BASE / "data" / "processed" / f"processed_data_{dataset}.npz"
-            if not npz_path.exists():
-                npz_path = _BASE / "data" / "processed" / "processed_data.npz"
-            if not npz_path.exists():
-                self._emit({"type": "error", "msg": f"No processed data for dataset '{dataset}'. Run preprocessing first."})
-                return
+            from src.data_loader import DataLoader
+            from src.preprocessor import Preprocessor
+            from src.training_data import prepare_holdout, save_holdout
 
-            data = np.load(npz_path, allow_pickle=True)
-            X = data["X"]
-            y = data["y"]
-            feature_names = list(data["feature_names"])
-
+            if source == "sample":
+                import pandas as pd
+                filenames = {"2017": "cicids2017_portscan_mixed_3000.csv",
+                             "2018": "cicids2018_mixed_attacks.csv"}
+                raw = pd.read_csv(_BASE / "examples" / "test_csvs" / filenames[dataset], low_memory=False)
+                self._emit({"type": "progress", "pct": 8, "msg": "Using the bundled demonstration sample; results do not represent the full dataset."})
+            else:
+                loader = DataLoader(dataset=dataset)
+                available, _ = loader.get_available_files()
+                if not available:
+                    self._emit({"type": "error", "msg": f"No raw CIC-IDS{dataset} CSVs found. Add the dataset to data/raw or choose the bundled sample."})
+                    return
+                raw = loader.load_all()
+            if raw is None or len(raw) == 0:
+                raise ValueError("Dataset contains no rows")
+            preprocessor = Preprocessor()
+            split = prepare_holdout(raw, preprocessor, dataset)
+            save_holdout(split, preprocessor, dataset)
+            del raw
+            X_train, X_test = split["X_train"], split["X_test"]
+            y_train, y_test = split["y_train"], split["y_test"]
+            feature_names = split["feature_names"]
             self._check_stop()
-            X_train, X_test, y_train, y_test = train_test_split(
-                X, y, test_size=0.2, random_state=42, stratify=y,
-            )
 
             n_attack = int((y_train == 1).sum())
             n_benign = int((y_train == 0).sum())
@@ -172,9 +183,15 @@ class TrainingService:
             )[:15]
 
             saved_path = trainer.save(dataset=dataset)
+            import joblib
+            from src.training_data import preprocessing_id
+            artifact = joblib.load(saved_path)
+            artifact["schema_id"] = preprocessing_id(preprocessor)
+            joblib.dump(artifact, saved_path)
             saved_filename = Path(saved_path).name
             _write_model_metadata(saved_filename, {
                 "dataset":       dataset,
+                "data_source":   source,
                 "training_mode": mode,
                 "accuracy":      round(acc, 4),
                 "precision":     round(prec, 4),
@@ -185,6 +202,16 @@ class TrainingService:
                 "feature_count": len(feature_names),
                 "created_date":  datetime.datetime.now().isoformat(),
             })
+
+            self._emit({"type": "progress", "pct": 87, "msg": "Training benign-flow anomaly detector…"})
+            from src.anomaly import train_anomaly_detector
+            from src.training_data import preprocessing_id
+            import joblib
+            anomaly_model = train_anomaly_detector(X_train, y_train)
+            joblib.dump({"model": anomaly_model, "schema_id": preprocessing_id(preprocessor)},
+                        _BASE / "models" / f"anomaly_model_{dataset}.joblib")
+            from api.services.anomaly_service import anomaly_service
+            anomaly_service.reset()
 
             # Train the matching attack-type classifier so it stays in sync with the
             # binary model (same dataset, same features). Cross-dataset still works,
@@ -205,6 +232,7 @@ class TrainingService:
                 "type": "done",
                 "mode": mode,
                 "dataset": dataset,
+                "data_source": source,
                 "train_samples": int(len(X_train)),
                 "test_samples":  int(len(X_test)),
                 "test_accuracy": round(acc, 4),

@@ -31,7 +31,7 @@ export default function SuspiciousIPs({ alerts = [] }) {
           ip,
           risk_score: a.risk_score ?? 0,
           risk_level: a.risk_level ?? 'LOW',
-          attack_type: a.prediction ?? '—',
+          attack_type: a.attack_type ?? a.prediction ?? '—',
           last_seen: a.timestamp,
         }
       } else if (a.timestamp > map[ip].last_seen) {

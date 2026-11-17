@@ -77,3 +77,19 @@ def test_feedback_api(tmp_path, monkeypatch):
     entries = body["feedback"]
     assert entries[0]["alert_id"] == "alert-001"
     assert entries[1]["alert_id"] == "alert-002"
+
+
+def test_feedback_records_feature_vector_and_model_context(tmp_path, monkeypatch):
+    from api.services.alert_store import alert_store
+    from api.routers.feedback import submit_feedback, FeedbackBody
+    from api.services.model_service import model_service
+    monkeypatch.setattr('api.routers.feedback.FEEDBACK_FILE', str(tmp_path / 'feedback.jsonl'))
+    monkeypatch.setattr(model_service, '_metadata', {'dataset': '2017'})
+    monkeypatch.setattr(model_service, '_feature_names', ['f1', 'f2'])
+    alert = alert_store.push({'is_attack': True, 'features': [1.0, 2.0],
+                              'model_dataset': '2017', 'model_features': ['f1', 'f2']})
+    submit_feedback(FeedbackBody(alert_id=alert['id'], label='false_positive'))
+    record = json.loads((tmp_path / 'feedback.jsonl').read_text())
+    assert record['features'] == [1.0, 2.0]
+    assert record['feature_names'] == ['f1', 'f2']
+    assert record['dataset'] == '2017'

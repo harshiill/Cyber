@@ -133,7 +133,7 @@ def _eval_portscan(flow: Dict[str, Any], rule: Dict) -> Optional[RuleMatch]:
             severity=rule["severity"],
             reason=(
                 f"Source contacted {distinct} distinct destination ports "
-                f"(threshold: {threshold}), indicating a port scan."
+                f"(threshold: {threshold}), suggesting a possible port scan."
             ),
         )
     return None
@@ -152,7 +152,7 @@ def _eval_bruteforce(flow: Dict[str, Any], rule: Dict) -> Optional[RuleMatch]:
             severity=rule["severity"],
             reason=(
                 f"Source made {connections} connections to brute-force target ports "
-                f"{target_ports} (threshold: {threshold}), indicating a brute-force attack."
+                f"{target_ports} (threshold: {threshold}), suggesting possible brute-force activity."
             ),
         )
     return None
@@ -170,7 +170,7 @@ def _eval_dos(flow: Dict[str, Any], rule: Dict) -> Optional[RuleMatch]:
             severity=rule["severity"],
             reason=(
                 f"Source generated {cps:.1f} connections/s "
-                f"(threshold: {threshold}), indicating a DoS-like flood."
+                f"(threshold: {threshold}), suggesting a possible DoS-like flood."
             ),
         )
     return None
@@ -192,7 +192,7 @@ def _eval_syn_flood(flow: Dict[str, Any], rule: Dict) -> Optional[RuleMatch]:
                 severity=rule["severity"],
                 reason=(
                     f"SYN/ACK ratio is {ratio:.1f} (SYN={syn}, ACK={ack}; "
-                    f"threshold ratio: {ratio_threshold}), indicating a SYN flood."
+                    f"threshold ratio: {ratio_threshold}), suggesting a possible SYN flood."
                 ),
             )
     return None

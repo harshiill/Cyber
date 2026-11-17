@@ -28,7 +28,7 @@ const STEPS = [
   {
     id:    'monitor',
     title: 'Start live monitoring',
-    desc:  'Pick a network interface up top and click Start to capture and classify flows in real time.',
+    desc:  'Live capture uses network rules; ML classification requires validated flow features.',
     cta:   null,
   },
 ]
@@ -61,7 +61,7 @@ export default function WelcomeBanner({ modelLoaded, hasAlerts }) {
 
       <p style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: showFull ? 18 : 8 }}>
         {modelLoaded
-          ? 'Pick an interface in the bar above and hit Start to begin live capture, or jump to Classify / Evaluate for offline tests.'
+          ? 'Play the loaded dataset above to demonstrate detection, or start capture for live rule alerts.'
           : 'NIDS-XAI flags network attacks in real time and explains every alert with SHAP and LIME. To use it, you need a trained model first.'}
       </p>
 

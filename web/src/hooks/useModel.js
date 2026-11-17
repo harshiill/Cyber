@@ -22,7 +22,16 @@ export function useModel() {
       .finally(() => setLoading(false))
   }, [])
 
-  useEffect(() => { refresh() }, [refresh])
+  useEffect(() => {
+    Promise.all([http.get('/model/list'), http.get('/status'), http.get('/model')])
+      .then(([modelsRes, statusRes, modelRes]) => {
+        setModels(modelsRes.data)
+        setStatus(statusRes.data)
+        setModelInfo(modelRes.data)
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [])
 
   return { models, status, modelInfo, loading, refresh }
 }

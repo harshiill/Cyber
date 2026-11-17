@@ -26,10 +26,12 @@ def train_type_model(dataset: str, min_per_class: int = 10) -> str:
         raise FileNotFoundError(f"No processed data for {dataset}: {npz}")
 
     data = np.load(npz, allow_pickle=True)
-    X, y = data["X"], data["y"]
+    if "split_version" not in data:
+        raise ValueError("Processed data has no independent holdout; retrain from raw data first.")
+    X, y = data["X_train"], data["y_train"]
     if "y_types" not in data or "attack_types" not in data:
         raise ValueError(f"{npz} has no attack-type labels (y_types / attack_types).")
-    y_types = data["y_types"]
+    y_types = data["types_train"]
     attack_types = list(data["attack_types"])
 
     mask = y == 1                       # attack rows only -> "which attack is it?"
@@ -47,7 +49,11 @@ def train_type_model(dataset: str, min_per_class: int = 10) -> str:
 
     out = BASE / "models" / f"type_model_{dataset}.joblib"
     out.parent.mkdir(parents=True, exist_ok=True)
-    joblib.dump({"model": clf, "attack_types": attack_types}, out)
+    from src.preprocessor import Preprocessor
+    from src.training_data import preprocessing_id
+    prep = Preprocessor()
+    prep.load(dataset)
+    joblib.dump({"model": clf, "attack_types": attack_types, "schema_id": preprocessing_id(prep)}, out)
     return str(out)
 
 

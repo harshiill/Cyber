@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import TopBar from '../components/TopBar'
+import { useModel } from '../hooks/useModel'
 import http from '../api/http'
 import { InfoTip } from '../components/ui'
 import {
@@ -75,7 +76,9 @@ function PredBadge({ prediction, prob }) {
 function SampleExplorer() {
   const [sampleType, setSampleType] = useState('attack')
   const [rowIndex, setRowIndex]     = useState('')
-  const [dataset, setDataset]       = useState('2017')
+  const [selectedDataset, setDataset] = useState(null)
+  const { modelInfo } = useModel()
+  const dataset = selectedDataset || modelInfo?.dataset || '2017'
   const [loading, setLoading]       = useState(false)
   const [data, setData]             = useState(null)
   const [err, setErr]               = useState(null)
@@ -221,7 +224,6 @@ function SampleExplorer() {
           {data.attack_type && (() => {
             const at = data.attack_type
             const sMax = Math.max(0.001, ...(at.shap || []).map(f => Math.abs(f.value)))
-            const lMax = Math.max(0.001, ...(at.lime || []).map(r => Math.abs(r.weight)))
             return (
               <div style={{ flexShrink: 0, borderTop: '2px solid var(--border)' }}>
                 <div style={{ background: 'var(--surface)', padding: '14px 20px 6px', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>

@@ -28,6 +28,7 @@ function Pill({ active, onClick, children, disabled, sub }) {
 
 export default function TrainPage() {
   const [dataset, setDataset] = useState('2017')
+  const [source, setSource] = useState('sample')
   const [running, setRunning] = useState(false)
   const [pct, setPct]         = useState(0)
   const [logs, setLogs]       = useState([])
@@ -50,17 +51,20 @@ export default function TrainPage() {
 
   async function startTraining() {
     setErr(null); setResult(null); setLogs([]); setPct(0)
-    try {
-      await http.post('/train', { dataset, mode: TRAIN_MODE })
-    } catch (e) {
-      setErr(e.response?.data?.detail || 'Failed to start training.')
-      return
-    }
-
-    setRunning(true)
     const wsHost = window.location.host.includes('5173') ? 'localhost:8000' : window.location.host
-    const ws = new WebSocket(`ws://${wsHost}/ws/training`)
+    const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
+    const ws = new WebSocket(`${protocol}://${wsHost}/ws/training`)
     wsRef.current = ws
+    setRunning(true)
+    ws.onopen = async () => {
+      try {
+        await http.post('/train', { dataset, mode: TRAIN_MODE, source })
+      } catch (e) {
+        setErr(e.response?.data?.detail || 'Failed to start training.')
+        setRunning(false)
+        ws.close()
+      }
+    }
 
     ws.onmessage = e => {
       const msg = JSON.parse(e.data)
@@ -126,6 +130,15 @@ export default function TrainPage() {
               </Pill>
             ))}
           </div>
+        </div>
+
+        <div style={{ marginBottom: 24 }}>
+          <label htmlFor="training-source" className="label">Training data</label>
+          <select id="training-source" value={source} disabled={running} onChange={e => setSource(e.target.value)} style={{ marginLeft: 12, padding: 8 }}>
+            <option value="sample">Bundled demonstration sample</option>
+            <option value="dataset">Full dataset from data/raw</option>
+          </select>
+          <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>The bundled sample is small; results do not represent the full dataset. Training replaces the saved model for the selected dataset.</p>
         </div>
 
         <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>

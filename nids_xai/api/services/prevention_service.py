@@ -71,62 +71,56 @@ class PreventionService:
             return {"action": "skipped", "ip": ip, "reason": "whitelisted", "mode": self._mode}
 
         with self._lock:
-            already = ip in self._blocked
-            if not already:
-                self._blocked[ip] = {
-                    "ip": ip,
-                    "blocked_at": time.time(),
-                    "ttl": effective_ttl,
-                    "reason": reason,
-                }
+            entry = self._blocked.get(ip)
+            if entry:
+                if entry["mode"] == "dry_run" and self._mode == "enforce":
+                    try:
+                        self._block_with_iptables(ip)
+                    except Exception as exc:
+                        return {"action": "failed", "ip": ip, "reason": str(exc), "mode": self._mode}
+                    entry["mode"] = "enforce"
+                    entry.update(blocked_at=time.time(), ttl=effective_ttl, reason=reason)
+                    return {"action": "blocked_iptables", "ip": ip, "ttl": effective_ttl, "mode": "enforce"}
+                entry.update(blocked_at=time.time(), ttl=effective_ttl, reason=reason)
+                return {"action": "refreshed", "ip": ip, "ttl": effective_ttl, "mode": entry["mode"]}
 
-        if already:
-            logger.info("[%s] %s already blocked (TTL refreshed). reason=%s", self._mode, ip, reason)
-            # Refresh TTL
-            with self._lock:
-                self._blocked[ip]["blocked_at"] = time.time()
-                self._blocked[ip]["ttl"] = effective_ttl
-                self._blocked[ip]["reason"] = reason
-            return {"action": "refreshed", "ip": ip, "ttl": effective_ttl, "mode": self._mode}
+            mode = self._mode
+            if mode == "enforce":
+                try:
+                    self._block_with_iptables(ip)
+                except Exception as exc:
+                    logger.error("iptables block failed for %s: %s", ip, exc)
+                    return {"action": "failed", "ip": ip, "reason": str(exc), "mode": mode}
+                action = "blocked_iptables"
+            elif mode == "dry_run":
+                action = "dry_run_blocked"
+            else:
+                return {"action": "logged", "ip": ip, "ttl": effective_ttl, "reason": reason, "mode": mode}
 
-        if self._mode == "enforce":
-            self._block_with_iptables(ip)
-            logger.warning("[enforce] BLOCKED %s via iptables. reason=%s ttl=%ds", ip, reason, effective_ttl)
-            action = "blocked_iptables"
-        elif self._mode == "dry_run":
-            logger.info("[dry_run] WOULD block %s. reason=%s ttl=%ds", ip, reason, effective_ttl)
-            action = "dry_run_blocked"
-        else:  # monitor
-            logger.info("[monitor] ALERT: would block %s. reason=%s ttl=%ds", ip, reason, effective_ttl)
-            action = "logged"
-
-        return {"action": action, "ip": ip, "ttl": effective_ttl, "reason": reason, "mode": self._mode}
+            self._blocked[ip] = {
+                "ip": ip, "blocked_at": time.time(), "ttl": effective_ttl,
+                "reason": reason, "mode": mode,
+            }
+        return {"action": action, "ip": ip, "ttl": effective_ttl, "reason": reason, "mode": mode}
 
     def unblock_ip(self, ip: str) -> dict:
-        """
-        Unblock an IP address.
-
-        Returns a dict describing the action taken.
-        """
+        """Remove a recorded block using the mode in which it was created."""
         with self._lock:
-            entry = self._blocked.pop(ip, None)
-
-        if entry is None:
-            logger.info("unblock_ip: %s was not blocked", ip)
-            return {"action": "not_found", "ip": ip}
-
-        if self._mode == "enforce":
-            self._unblock_with_iptables(ip)
-            logger.warning("[enforce] UNBLOCKED %s via iptables.", ip)
-            action = "unblocked_iptables"
-        elif self._mode == "dry_run":
-            logger.info("[dry_run] WOULD unblock %s.", ip)
-            action = "dry_run_unblocked"
-        else:
-            logger.info("[monitor] ALERT: would unblock %s.", ip)
-            action = "logged"
-
-        return {"action": action, "ip": ip, "mode": self._mode}
+            entry = self._blocked.get(ip)
+            if entry is None:
+                return {"action": "not_found", "ip": ip}
+            mode = entry["mode"]
+            if mode == "enforce":
+                try:
+                    self._unblock_with_iptables(ip)
+                except Exception as exc:
+                    logger.error("iptables unblock failed for %s: %s", ip, exc)
+                    return {"action": "failed", "ip": ip, "reason": str(exc), "mode": mode}
+                action = "unblocked_iptables"
+            else:
+                action = "dry_run_unblocked"
+            del self._blocked[ip]
+        return {"action": action, "ip": ip, "mode": mode}
 
     def get_blocked(self) -> List[dict]:
         """Return list of currently blocked IPs with metadata."""
@@ -139,6 +133,7 @@ class PreventionService:
                 result.append({
                     "ip": ip,
                     "reason": meta["reason"],
+                    "mode": meta["mode"],
                     "blocked_at": meta["blocked_at"],
                     "ttl": meta["ttl"],
                     "expires_in_seconds": round(remaining, 1),
@@ -154,46 +149,15 @@ class PreventionService:
         ONLY called in enforce mode.
         Creates NIDS_BLOCK chain if it doesn't exist, then adds a DROP rule.
         """
-        try:
-            # Ensure chain exists
-            subprocess.run(
-                ["iptables", "-N", IPTABLES_CHAIN],
-                capture_output=True, check=False,  # -N errors if chain already exists; ignore
-            )
-            # Jump to chain from INPUT if not already hooked
-            subprocess.run(
-                ["iptables", "-C", "INPUT", "-j", IPTABLES_CHAIN],
-                capture_output=True, check=False,
-            )
-            ret = subprocess.run(
-                ["iptables", "-C", "INPUT", "-j", IPTABLES_CHAIN],
-                capture_output=True,
-            )
-            if ret.returncode != 0:
-                subprocess.run(
-                    ["iptables", "-I", "INPUT", "1", "-j", IPTABLES_CHAIN],
-                    capture_output=True, check=True,
-                )
-            # Add DROP rule for IP
-            subprocess.run(
-                ["iptables", "-A", IPTABLES_CHAIN, "-s", ip, "-j", "DROP"],
-                check=True,
-            )
-        except Exception as exc:
-            logger.error("iptables block failed for %s: %s", ip, exc)
+        subprocess.run(["iptables", "-N", IPTABLES_CHAIN], capture_output=True, check=False)
+        ret = subprocess.run(["iptables", "-C", "INPUT", "-j", IPTABLES_CHAIN], capture_output=True)
+        if ret.returncode != 0:
+            subprocess.run(["iptables", "-I", "INPUT", "1", "-j", IPTABLES_CHAIN], capture_output=True, check=True)
+        subprocess.run(["iptables", "-A", IPTABLES_CHAIN, "-s", ip, "-j", "DROP"], capture_output=True, check=True)
 
     def _unblock_with_iptables(self, ip: str) -> None:
-        """
-        ONLY called in enforce mode.
-        Removes the DROP rule for this IP from NIDS_BLOCK chain.
-        """
-        try:
-            subprocess.run(
-                ["iptables", "-D", IPTABLES_CHAIN, "-s", ip, "-j", "DROP"],
-                check=True,
-            )
-        except Exception as exc:
-            logger.error("iptables unblock failed for %s: %s", ip, exc)
+        """Remove the DROP rule for this IP from the NIDS chain."""
+        subprocess.run(["iptables", "-D", IPTABLES_CHAIN, "-s", ip, "-j", "DROP"], capture_output=True, check=True)
 
     # ------------------------------------------------------------------ #
     #  Background TTL cleanup                                             #

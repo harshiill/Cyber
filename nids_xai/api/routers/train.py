@@ -11,6 +11,7 @@ _MODELS_DIR = Path(__file__).parent.parent.parent / "models"
 class TrainRequest(BaseModel):
     dataset: str = "2017"
     mode: str = "standard"
+    source: str = "dataset"
 
 
 class LabelRequest(BaseModel):
@@ -20,13 +21,18 @@ class LabelRequest(BaseModel):
 
 @router.post("/api/train")
 def start_training(req: TrainRequest):
+    from api.services.monitor_service import monitor_service
+    if monitor_service.is_running:
+        raise HTTPException(status_code=409, detail="Stop monitoring before training a model.")
     if training_service.is_running:
         raise HTTPException(status_code=400, detail="Training already in progress.")
     if req.dataset not in ("2017", "2018"):
         raise HTTPException(status_code=400, detail="dataset must be '2017' or '2018'.")
     if req.mode not in ("quick", "standard", "optimized", "auto"):
         raise HTTPException(status_code=400, detail="mode must be quick, standard, optimized, or auto.")
-    training_service.start(req.dataset, req.mode, model_service)
+    if req.source not in ("dataset", "sample"):
+        raise HTTPException(status_code=400, detail="source must be dataset or sample.")
+    training_service.start(req.dataset, req.mode, model_service, req.source)
     return {"started": True, "dataset": req.dataset, "mode": req.mode}
 
 

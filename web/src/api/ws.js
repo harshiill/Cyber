@@ -28,7 +28,7 @@ export function createWs(path, onMessage, { onStatus } = {}) {
       onStatus?.('open')
     }
     ws.onmessage = (e) => {
-      try { onMessage(JSON.parse(e.data)) } catch (err) { /* ignore malformed frames */ }
+      try { onMessage(JSON.parse(e.data)) } catch { /* ignore malformed frames */ }
     }
     ws.onclose = () => {
       onStatus?.('closed')

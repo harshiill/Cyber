@@ -132,21 +132,14 @@ class NIDSApp:
         self.preprocessor = Preprocessor()
 
         try:
-            # Preprocess - now returns attack types too
-            X, y, y_types, self.feature_names = self.preprocessor.fit_transform(raw_data)
+            from src.training_data import prepare_holdout, save_holdout
+            split = prepare_holdout(raw_data, self.preprocessor, dataset)
+            save_holdout(split, self.preprocessor, dataset)
+            self.feature_names = split["feature_names"]
+            self.X_train, self.X_test = split["X_train"], split["X_test"]
+            self.y_train, self.y_test = split["y_train"], split["y_test"]
+            self.y_types_test = split["types_test"]
             del raw_data
-            gc.collect()
-
-            # 80/20 split
-            splits = self.preprocessor.split_data(X, y, y_types)
-            self.X_train, self.X_test = splits[0], splits[1]
-            self.y_train, self.y_test = splits[2], splits[3]
-            self.y_types_test = splits[5] if len(splits) > 5 else None
-
-            # Save
-            self.preprocessor.save_data(X, y, y_types)
-            self.preprocessor.save()
-            del X, y, y_types
             gc.collect()
 
             self.data_ready = True
@@ -161,23 +154,21 @@ class NIDSApp:
         """Load previously saved data."""
         print_header("Load Saved Data")
 
-        if not (PROCESSED_DATA_DIR / PROCESSED_DATA_FILENAME).exists():
+        from config.config import get_processed_data_filename
+        path = PROCESSED_DATA_DIR / get_processed_data_filename(self.current_dataset)
+        if not path.exists():
             print_error("No saved data. Use option 1 first.")
             return
-
         try:
+            data = np.load(path, allow_pickle=True)
+            if "split_version" not in data:
+                raise ValueError("Processed data has no independent holdout; preprocess raw data again.")
             self.preprocessor = Preprocessor()
-            X, y, y_types, self.feature_names = self.preprocessor.load_data()
-            self.preprocessor.load()
-
-            # Split
-            splits = self.preprocessor.split_data(X, y, y_types)
-            self.X_train, self.X_test = splits[0], splits[1]
-            self.y_train, self.y_test = splits[2], splits[3]
-            self.y_types_test = splits[5] if len(splits) > 5 else None
-
-            del X, y
-            gc.collect()
+            self.preprocessor.load(self.current_dataset)
+            self.feature_names = list(data["feature_names"])
+            self.X_train, self.X_test = data["X_train"], data["X_test"]
+            self.y_train, self.y_test = data["y_train"], data["y_test"]
+            self.y_types_test = data["types_test"]
 
             self.data_ready = True
             print_success("Data loaded!")

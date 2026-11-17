@@ -61,29 +61,34 @@ class ModelService:
 
     def load(self, model_filename: str) -> Dict:
         """Load a model + matching preprocessor by filename."""
+        from api.services.monitor_service import monitor_service
+        if monitor_service.is_running:
+            raise RuntimeError("Stop monitoring before switching models.")
         model_path = _MODEL_DIR / model_filename
         if not model_path.exists():
             raise FileNotFoundError(f"Model not found: {model_filename}")
 
         saved = joblib.load(model_path)
-        self._model = saved.get("model") or saved  # handle both wrapped and raw
-        self._feature_names = saved.get("feature_names", [])
+        if not isinstance(saved, dict) or not saved.get("schema_id"):
+            raise ValueError("Model has no preprocessing identity. Retrain it from raw data.")
+        new_model = saved["model"]
+        new_feature_names = list(saved.get("feature_names", []))
 
-        # Load matching preprocessor as a proper Preprocessor instance
         import sys
         sys.path.insert(0, str(_BASE))
         from src.preprocessor import Preprocessor
+        from src.training_data import preprocessing_id
         dataset = self._resolve_dataset(model_filename)
         prep = Preprocessor()
         try:
             prep.load(dataset)
-            self._preprocessor = prep
-        except FileNotFoundError:
-            try:
-                prep.load(None)  # fallback to generic preprocessor.joblib
-                self._preprocessor = prep
-            except FileNotFoundError:
-                self._preprocessor = None
+        except FileNotFoundError as exc:
+            raise ValueError("Matching preprocessing data is missing. Retrain the model.") from exc
+        if saved["schema_id"] != preprocessing_id(prep) or new_feature_names != list(prep.feature_names):
+            raise ValueError("Model and preprocessing data do not match. Retrain the model.")
+        self._model = new_model
+        self._feature_names = new_feature_names
+        self._preprocessor = prep
 
         # Record metadata
         all_meta = self.list_models()
@@ -108,7 +113,7 @@ class ModelService:
         if latest:
             try:
                 return self.load(latest[0])
-            except FileNotFoundError:
+            except (FileNotFoundError, ValueError):
                 return None
         return None
 

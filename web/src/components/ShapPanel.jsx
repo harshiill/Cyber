@@ -35,33 +35,28 @@ function DirectionLegend() {
 export default function ShapPanel({ selectedId, onClose }) {
   const [shap, setShap] = useState(null)
   const [lime, setLime] = useState(null)
-  const [shapLoading, setShapLoading] = useState(false)
-  const [limeLoading, setLimeLoading] = useState(false)
+  const [shapLoading, setShapLoading] = useState(Boolean(selectedId))
+  const [limeLoading, setLimeLoading] = useState(Boolean(selectedId))
   const [shapErr, setShapErr] = useState(null)
   const [limeErr, setLimeErr] = useState(null)
   const [typeExp, setTypeExp] = useState(null)
-  const [typeLoading, setTypeLoading] = useState(false)
+  const [typeLoading, setTypeLoading] = useState(Boolean(selectedId))
   const [feedbackSaved, setFeedbackSaved] = useState(false)
 
   // Fetch both SHAP (fast) and LIME (slow) when the selected alert changes.
   useEffect(() => {
-    setShap(null); setLime(null); setShapErr(null); setLimeErr(null); setTypeExp(null)
-    setFeedbackSaved(false)
     if (!selectedId) return
 
-    setTypeLoading(true)
     http.get(`/explain/${selectedId}/type`)
       .then(r => setTypeExp(r.data))
       .catch(() => setTypeExp(null))
       .finally(() => setTypeLoading(false))
 
-    setShapLoading(true)
     http.get(`/explain/${selectedId}`)
       .then(r => setShap(r.data))
       .catch(e => setShapErr(e.response?.data?.detail || 'SHAP unavailable.'))
       .finally(() => setShapLoading(false))
 
-    setLimeLoading(true)
     http.get(`/explain/${selectedId}/lime`)
       .then(r => setLime(r.data))
       .catch(e => setLimeErr(e.response?.data?.detail || 'LIME unavailable.'))

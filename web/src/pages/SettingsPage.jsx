@@ -101,6 +101,7 @@ export default function SettingsPage() {
                 <InfoRow label="Training samples"
                   value={meta.train_samples.toLocaleString()} />
               )}
+              {meta.data_source && <InfoRow label="Training data" value={meta.data_source === 'sample' ? 'Demonstration sample' : 'Full dataset'} />}
               {meta.training_mode && (
                 <InfoRow label="Training mode" value={meta.training_mode} />
               )}

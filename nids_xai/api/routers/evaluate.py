@@ -82,15 +82,11 @@ def run_evaluation(req: EvalRequest = EvalRequest()):
             raise HTTPException(status_code=404,
                 detail=f"No processed data for {test_dataset}. Run preprocessing first.")
         data = np.load(npz_path, allow_pickle=True)
-        X = data["X"]
-        y = data["y"]
-        y_types = data["y_types"] if "y_types" in data else None
+        if "split_version" not in data:
+            raise HTTPException(status_code=400, detail="This processed cache has no independent holdout. Retrain from raw data first.")
+        X_test, y_test = data["X_test"], data["y_test"]
+        y_types_test = data["types_test"] if "types_test" in data else None
         attack_types = list(data["attack_types"]) if "attack_types" in data else []
-        indices = np.arange(len(y))
-        _, test_idx = train_test_split(indices, test_size=0.2, random_state=42, stratify=y)
-        X_test = X[test_idx]
-        y_test = y[test_idx]
-        y_types_test = y_types[test_idx] if y_types is not None else None
 
     expected = len(model_service.feature_names)
     if expected and X_test.shape[1] != expected:
@@ -164,7 +160,9 @@ def run_evaluation(req: EvalRequest = EvalRequest()):
     attack_breakdown = []
     if y_types_test is not None and attack_types:
         for i, name in enumerate(attack_types):
-            mask = y_types_test == i
+            if str(name).strip().upper() == "BENIGN":
+                continue
+            mask = (y_types_test == i) & (y_test == 1)
             if mask.sum() == 0:
                 continue
             type_acc = float((y_pred[mask] == y_test[mask]).mean())
@@ -247,23 +245,16 @@ def validate_explanations(req: ExplainValidationRequest = ExplainValidationReque
     from sklearn.model_selection import train_test_split
     from api.services.explainer_service import explainer_service
 
+    if test_dataset != train_dataset:
+        raise HTTPException(status_code=400, detail="Explanation validation requires the loaded model's own holdout dataset.")
     data = np.load(npz_path, allow_pickle=True)
-    X = data["X"]
-    y = data["y"]
-
+    if "split_version" not in data:
+        raise HTTPException(status_code=400, detail="Retrain from raw data to create an independent holdout.")
+    X, y = data["X_test"], data["y_test"]
     expected = len(model_service.feature_names)
     if expected and X.shape[1] != expected:
-        raise HTTPException(status_code=400, detail=(
-            f"Feature mismatch: model expects {expected} features but {test_dataset} "
-            f"NPZ has {X.shape[1]}."
-        ))
-
-    # Same holdout split as /api/evaluate (seed 42) so we validate on unseen rows.
-    if test_dataset == train_dataset:
-        indices = np.arange(len(y))
-        _, test_idx = train_test_split(indices, test_size=0.2, random_state=42, stratify=y)
-    else:
-        test_idx = np.arange(len(y))
+        raise HTTPException(status_code=400, detail="Feature mismatch between model and held-out data.")
+    test_idx = np.arange(len(y))
 
     # Balanced sample: half attack, half benign (within what's available).
     rng = np.random.default_rng(42)

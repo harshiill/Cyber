@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import TopBar from '../components/TopBar'
 import KpiCards from '../components/KpiCards'
 import TrafficChart from '../components/TrafficChart'
@@ -43,7 +42,7 @@ export default function Dashboard() {
   const { alerts, selectedId, selectAlert, wsError, wsState, clearLocal } = useAlerts()
   const stats = useStats()
   const { status, modelInfo } = useModel()
-  const [running, setRunning] = useState(false)
+  const running = Boolean(stats.running)
 
   async function handleClear() {
     await http.post('/alerts/clear')
@@ -52,11 +51,11 @@ export default function Dashboard() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: 'var(--bg)' }}>
-      <TopBar running={running} mode={status?.monitor_mode} source={status?.monitor_source} />
+      <TopBar running={running} mode={stats.mode} source={stats.source} />
 
       <div style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)', padding: '10px 24px',
         display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        <ModeToggle running={running} onStarted={() => setRunning(true)} onStopped={() => setRunning(false)} />
+        <ModeToggle running={running} />
         {wsError && <span style={{ fontSize: 11, color: 'var(--threat)' }}>{wsError}</span>}
         {wsState === 'closed' && (
           <span style={{ fontSize: 10, color: 'var(--amber)', fontWeight: 600,
@@ -74,7 +73,7 @@ export default function Dashboard() {
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 1, overflowY: 'auto' }}>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 240px', gap: 1, background: 'var(--border)', minHeight: 280 }}>
           <TrafficChart history={stats.traffic_history} labels={stats.traffic_labels} />
-          <DonutChart attacks={stats.attacks} benign={stats.benign} />
+          <DonutChart attacks={stats.attacks} benign={stats.benign} unclassified={stats.unclassified || 0} />
           <AlertTable alerts={alerts} selectedId={selectedId} onSelect={selectAlert} onClear={handleClear} />
           <SessionPanel stats={stats} />
         </div>
@@ -85,8 +84,8 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <ShapPanel selectedId={selectedId} onClose={() => selectAlert(null)} />
-      <StatusBar modelFile={status?.model_file} source={status?.monitor_source} stats={stats} />
+      <ShapPanel key={selectedId || 'none'} selectedId={selectedId} onClose={() => selectAlert(null)} />
+      <StatusBar modelFile={status?.model_file} source={stats.source} stats={stats} />
     </div>
   )
 }

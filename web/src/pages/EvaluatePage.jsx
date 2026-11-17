@@ -60,9 +60,10 @@ export default function EvaluatePage() {
   const [thrData, setThrData]   = useState(null)
   const [thrLoading, setThrLoading] = useState(false)
   const [err, setErr]           = useState(null)
-  const [dataset, setDataset]   = useState('2017')
+  const [selectedDataset, setDataset] = useState(null)
   const [threshold, setThreshold] = useState(0.5)
   const { modelInfo } = useModel()
+  const dataset = selectedDataset || modelInfo?.dataset || '2017'
 
   // Explanation-validation state (independent of the detection eval above)
   const [xLoading, setXLoading] = useState(false)
@@ -124,7 +125,7 @@ export default function EvaluatePage() {
         >
           {modelInfo?.model_file && (
             <span style={{ fontSize: 10, color: 'var(--text-faint)', fontFamily: 'var(--font-mono)' }}>
-              Trained on: <strong style={{ color: 'var(--text-muted)' }}>CIC-IDS{trainDs || '?'}</strong>
+              Trained on: <strong style={{ color: 'var(--text-muted)' }}>CIC-IDS{trainDs || '?'}{modelInfo?.metadata?.data_source === 'sample' ? ' demonstration sample' : ''}</strong>
             </span>
           )}
         </PageHeader>
@@ -397,7 +398,7 @@ export default function EvaluatePage() {
         <div style={{ marginTop: 40, paddingTop: 28, borderTop: '1px solid var(--border)' }}>
           <PageHeader
             title="Explanation Validation"
-            subtitle="Proves the explanations are trustworthy, not just the classifier. Runs SHAP and LIME on a labelled sample and measures whether the two independent methods agree, and whether the features they highlight are the ones the model actually relies on."
+            subtitle="Compares SHAP and LIME on a held-out sample and measures agreement and feature influence. These checks do not prove an explanation is correct."
           />
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>

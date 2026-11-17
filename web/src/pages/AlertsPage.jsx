@@ -76,7 +76,6 @@ export default function AlertsPage() {
   const timeline = useMemo(() => bucketAlerts(alerts, bucketSec), [alerts, bucketSec])
 
   function load() {
-    setLoading(true)
     http.get('/alerts?limit=500')
       .then(r => setAlerts(r.data || []))
       .catch(() => setAlerts([]))
@@ -93,7 +92,7 @@ export default function AlertsPage() {
 
   const visible = alerts.filter(a => {
     if (filter === 'Threats') return a.is_attack
-    if (filter === 'Benign')  return !a.is_attack
+    if (filter === 'Benign')  return !a.is_attack && a.prediction !== 'Unclassified'
     return true
   })
 

@@ -27,7 +27,7 @@ function Row({ alert, selected, onSelect }) {
   // Confidence in the decision shown (falls back for older alerts without the field).
   const conf = alert.confidence != null
     ? alert.confidence
-    : (isAtk ? alert.attack_prob : 1 - alert.attack_prob)
+    : (alert.ml_available === false ? null : (isAtk ? alert.attack_prob : 1 - alert.attack_prob))
   const hasExplanation = Array.isArray(alert.explanation) && alert.explanation.length > 0
   return (
     <>
@@ -45,13 +45,13 @@ function Row({ alert, selected, onSelect }) {
       >
         <td style={{ padding: '7px 10px' }}>
           <span className={`badge badge--${isAtk ? 'attack' : 'benign'}`}>
-            {isAtk ? 'ATTACK' : 'BENIGN'}
+            {alert.prediction === 'Unclassified' ? 'UNCLASSIFIED' : alert.prediction === 'Anomaly' ? 'ANOMALY' : isAtk ? 'ATTACK' : 'BENIGN'}
           </span>
         </td>
-        <td className="mono" style={{ padding: '7px 6px', fontSize: 10, color: 'var(--text-muted)' }}>{alert.src_ip}</td>
-        <td className="mono" style={{ padding: '7px 6px', fontSize: 10, color: 'var(--text-muted)' }}>{alert.dst_ip}:{alert.dst_port}</td>
+        <td className="mono" style={{ padding: '7px 6px', fontSize: 10, color: 'var(--text-muted)' }}>{alert.src_ip ?? 'Not recorded'}</td>
+        <td className="mono" style={{ padding: '7px 6px', fontSize: 10, color: 'var(--text-muted)' }}>{alert.dst_ip ? `${alert.dst_ip}:${alert.dst_port}` : 'Not recorded'}</td>
         <td style={{ padding: '7px 6px', fontSize: 11, fontWeight: 700, color: isAtk ? 'var(--threat)' : 'var(--benign)' }}>
-          {(conf * 100).toFixed(1)}%
+          {conf == null ? '—' : `${(conf * 100).toFixed(1)}%`}
         </td>
         <td style={{ padding: '7px 6px' }}>
           {alert.risk_level
@@ -59,7 +59,7 @@ function Row({ alert, selected, onSelect }) {
             : <span style={{ color: 'var(--text-faint)', fontSize: 9 }}>—</span>
           }
         </td>
-        <td style={{ padding: '7px 6px', fontSize: 10, color: 'var(--text-muted)' }}>{alert.prediction ?? '—'}</td>
+        <td style={{ padding: '7px 6px', fontSize: 10, color: 'var(--text-muted)' }}>{alert.attack_type ?? alert.prediction ?? '—'}</td>
         <td className="mono" style={{ padding: '7px 10px', fontSize: 9, color: 'var(--text-xfaint)' }}>{alert.timestamp}</td>
       </tr>
       {sel && hasExplanation && (
@@ -85,7 +85,7 @@ export default function AlertTable({ alerts, selectedId, onSelect, onClear }) {
   const visible = alerts.filter(a =>
     filter === 'all'    ? true :
     filter === 'attack' ? a.is_attack :
-    !a.is_attack
+    !a.is_attack && a.prediction !== 'Unclassified'
   )
   return (
     <div className="surface panel" style={{ overflow: 'hidden' }}>

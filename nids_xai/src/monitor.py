@@ -14,6 +14,7 @@ Author: Final Year CS Project
 """
 
 import sys
+import os
 import threading
 import time
 import logging
@@ -161,13 +162,10 @@ class NetworkMonitor:
     def _capture_live(self, interface: str) -> None:
         """Thread: sniff live packets on interface."""
         try:
-            sniff(
-                iface=interface,
-                prn=self._packet_handler,
-                store=False,
-                stop_filter=lambda _: self._stop_event.is_set(),
-            )
+            while not self._stop_event.is_set():
+                sniff(iface=interface, prn=self._packet_handler, store=False, timeout=1)
         except Exception as e:
+            self._stop_event.set()
             logger.error(f"Live capture error on {interface}: {e}")
             # Emit an error event so the GUI can show a message
             self.event_callback({
@@ -229,7 +227,7 @@ class NetworkMonitor:
             tcp = pkt[TCP]
             src_port = tcp.sport
             dst_port = tcp.dport
-            header_length = tcp.dataofs * 4 if hasattr(tcp, 'dataofs') else 20
+            header_length = (tcp.dataofs or 5) * 4
             window_size = tcp.window if hasattr(tcp, 'window') else 0
 
             # Parse TCP flags into dict (same format as PcapConverter)
@@ -274,6 +272,7 @@ class NetworkMonitor:
             # Call add_packet with the exact signature from NetworkFlow
             flow.add_packet(
                 src_ip=src_ip,
+                src_port=src_port,
                 packet_size=packet_size,
                 timestamp=timestamp,
                 header_length=header_length,
@@ -339,6 +338,22 @@ class NetworkMonitor:
             if not raw:
                 return
 
+            missing = sorted(set(getattr(self.preprocessor, "feature_names", [])) - set(raw))
+            experimental = os.environ.get("NIDS_EXPERIMENTAL_LIVE_ML", "0") == "1"
+            if missing or not experimental:
+                reason = ("Missing model features: " + ", ".join(missing)) if missing else (
+                    "Live flow features are unvalidated against the training extractor; ML is disabled."
+                )
+                self.event_callback({
+                    "type": "monitor_event", "timestamp": datetime.now().strftime("%H:%M:%S"),
+                    "src_ip": key.src_ip, "src_port": key.src_port, "dst_ip": key.dst_ip,
+                    "dst_port": key.dst_port, "prediction": "Unclassified", "confidence": None,
+                    "is_alert": False, "features": None, "missing_features": missing, "ml_reason": reason,
+                    "syn_flag_count": raw.get("SYN Flag Count", 0),
+                    "ack_flag_count": raw.get("ACK Flag Count", 0),
+                })
+                return
+
             # Transform via preprocessor
             df = pd.DataFrame([raw])
             X = self.preprocessor.transform(df)
@@ -400,6 +415,8 @@ class NetworkMonitor:
                 "shap_factors": shap_factors,
                 "features": X[0].tolist(),
                 "stats": dict(self._stats),
+                "syn_flag_count": raw.get("SYN Flag Count", 0),
+                "ack_flag_count": raw.get("ACK Flag Count", 0),
             }
 
             self.event_callback(event)

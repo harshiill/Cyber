@@ -29,6 +29,13 @@ class TypeClassifierService:
             self._dataset = dataset
             return False
         data = joblib.load(path)
+        from api.services.model_service import model_service
+        from src.training_data import preprocessing_id
+        schema_id = preprocessing_id(model_service.preprocessor)
+        if not schema_id or data.get("schema_id") != schema_id:
+            self._model = None
+            self._dataset = dataset
+            return False
         self._model = data["model"]
         self._types = list(data["attack_types"])
         self._dataset = dataset

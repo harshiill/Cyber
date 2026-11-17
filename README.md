@@ -1,250 +1,54 @@
-# Network Intrusion Detection System with Explainable AI (NIDS-XAI)
+# NIDS-XAI: Network Intrusion Detection and Explainable AI
 
-A machine learning Network Intrusion Detection System that classifies network
-traffic as benign or malicious using a Random Forest model, and explains every
-decision in plain English using SHAP and LIME. A second model names the attack
-type (Port Scan, DoS, Brute Force, and so on), and a live web dashboard streams
-alerts with their explanations in real time.
+NIDS-XAI is a lab-oriented final-year project combining a Random Forest classifier, source-based detection rules, anomaly detection, explanations, a FastAPI backend, and a React dashboard. It supports CIC-IDS2017 and CIC-IDS2018 CSV data; UNSW-NB15 is not currently supported.
 
-This is a Final Year Project. It is built for detection and explanation in a lab
-setting, not for blocking traffic or production deployment.
+## Start the demonstration
 
----
+Requirements: Python 3.11 or 3.12 recommended, Node.js 20.19+ or 22+, and npm. The full datasets require significant memory; the bundled samples are much smaller.
 
-## Key features
-
-- **Binary detection** — Random Forest classifies each network flow as Benign or Attack
-- **Dual explainability** — SHAP and LIME explain every prediction, with a plain-English narrative
-- **Attack-type classifier** — a second Random Forest names the attack type for flagged flows
-- **Live web dashboard** — React frontend over a FastAPI backend, streaming alerts and stats over WebSockets
-- **Two datasets** — CIC-IDS2017 and CIC-IDS2018, with cross-dataset validation
-- **Faithful explanations** — SHAP contributions reconstruct the model output and agree with the model's own feature importances
-
----
-
-## Architecture
-
-The project has three tiers:
-
-```
-React Frontend  ──HTTP / WebSocket──►  FastAPI Backend  ──►  AI Detection Engine
-   (web/)                                 (nids_xai/api/)        (nids_xai/src/)
- dashboard, alerts,                    REST + WebSocket        Random Forest,
- charts, SHAP panel                    routers + services      SHAP + LIME, monitor
-```
-
-- **Frontend** (`web/`) — React 19 + Vite, react-router, recharts, axios. The dashboard, alert table, KPI cards and SHAP panel.
-- **Backend** (`nids_xai/api/`) — FastAPI app exposing REST endpoints and three WebSocket channels (`/ws/alerts`, `/ws/stats`, `/ws/training`). Thin routers delegate to singleton services.
-- **Detection engine** (`nids_xai/src/`) — the preprocessing, Random Forest training, SHAP/LIME explainer, and flow monitor.
-
-There is also a menu-driven **CLI** (`nids_xai/main.py`) for training, evaluation and explanation without the web stack.
-
----
-
-## Project structure
-
-```
-nids_xai_projectv2/
-├── README.md                     # This file
-├── docs/                         # Architecture and testing notes
-├── nids_xai/
-│   ├── api/                      # FastAPI backend
-│   │   ├── main.py               #   app factory, CORS, router registration
-│   │   ├── routers/              #   HTTP endpoints (model, monitor, alerts, explain, train, evaluate, classify)
-│   │   ├── services/             #   logic + state (model, monitor, explainer, alert store, type classifier)
-│   │   └── ws/                   #   WebSocket endpoints + connection manager
-│   ├── src/
-│   │   ├── data_loader.py        #   chunked CSV loading
-│   │   ├── preprocessor.py       #   cleaning, feature selection, scaling, split
-│   │   ├── model_trainer.py      #   Random Forest training + persistence
-│   │   ├── type_trainer.py       #   attack-type classifier training
-│   │   ├── evaluator.py          #   metrics + plots
-│   │   ├── explainer.py          #   SHAP + LIME with English summaries
-│   │   ├── classifier.py         #   CSV classification (CLI)
-│   │   ├── monitor.py            #   live / replay flow monitor
-│   │   └── pcap_converter.py     #   PCAP -> flow CSV
-│   ├── config/config.py          # all configuration constants
-│   ├── data/raw/                 # CIC-IDS2017 / 2018 CSVs (not committed)
-│   ├── data/processed/           # preprocessed cache (not committed)
-│   ├── models/                   # trained models (not committed)
-│   ├── examples/                 # sample CSVs/PCAPs for the demo
-│   ├── tools/kali_replay.py      # feeds dataset flows to the backend over the network
-│   ├── tests/                    # CLI + integration tests
-│   ├── main.py                   # CLI entry point
-│   └── requirements.txt
-└── web/                          # React dashboard (see web/README.md)
-```
-
----
-
-## Requirements
-
-- Python 3.10+
-- Node.js 18+ (for the web dashboard)
-- 16 GB RAM recommended for training on the full datasets
-- Npcap (Windows) only if you want live packet capture with Scapy
-
----
-
-## Installation
-
-### Backend
+In one terminal:
 
 ```bash
 cd nids_xai
-python -m venv venv
-venv\Scripts\activate          # Windows
-# source venv/bin/activate     # Linux/macOS
+python -m venv .venv
+source .venv/bin/activate       # macOS/Linux; Windows: .venv\Scripts\activate
 pip install -r requirements.txt
+uvicorn api.main:app --host 127.0.0.1 --port 8000
 ```
 
-### Frontend
+In another terminal:
 
 ```bash
 cd web
-npm install
+npm ci
+npm run dev
 ```
 
----
+Open the Vite address shown in the terminal (normally http://localhost:5173). If the frontend has already been built with `npm run build`, the backend also serves it at http://127.0.0.1:8000. On **Train**, select CIC-IDS2018 and **Bundled demonstration sample**, then start training. The sample contains several attack types and benign flows; its results represent this sample, not performance on the entire dataset. Training replaces the saved model and preprocessing files for the chosen dataset. Once training finishes, return to **Dashboard** and play the matching dataset. Select an alert to inspect explanations and submit feedback. Dataset samples do not contain source IPs, so those fields are shown as not recorded.
 
-## Datasets
-
-Place the CIC-IDS CSV files under:
-
-```
-nids_xai/data/raw/CIC-IDS-2017/
-nids_xai/data/raw/CIC-IDS-2018/
-```
-
-- CIC-IDS2017: https://www.unb.ca/cic/datasets/ids-2017.html
-- CIC-IDS2018: https://www.unb.ca/cic/datasets/ids-2018.html
-
-Datasets and trained models are gitignored (too large to commit). Train a model
-once and the processed cache and `.joblib` files are created locally.
-
----
-
-## Run Instructions
-
-### Quick Start
-
-```bash
-# 1. Backend (Python 3.10+)
-cd nids_xai
-pip install -r requirements.txt
-uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
-
-# 2. Frontend
-cd web
-npm install
-npm run dev        # dev server on :5173
-# or npm run build to build for production
-```
-
-### Configuration
-
-Key environment variables:
-- `NIDS_ENFORCEMENT_MODE` — `monitor` (default), `dry_run`, or `enforce`
-- `NIDS_BLOCK_TTL` — block TTL in seconds (default: 3600)
-- `NIDS_IP_WHITELIST` — comma-separated IPs never to block (default: 127.0.0.1,::1)
-
-### API Endpoints (new in this release)
-
-- `GET /api/blocked` — list blocked IPs
-- `POST /api/unblock/{ip}` — unblock an IP
-- `GET /api/prevention/mode` — current enforcement mode
-- `POST /api/prevention/mode` — set enforcement mode
-- `POST /api/feedback` — submit true_positive/false_positive feedback
-- `GET /api/feedback` — list feedback entries
-
-### Running Tests
-
-```bash
-cd nids_xai
-pytest tests/ -v
-```
-
-### Retraining with Feedback
-
-```bash
-cd nids_xai
-python scripts/retrain.py --dataset 2017
-# A versioned model is saved to models/ — it is NOT auto-deployed.
-# Review it, then manually copy it to replace nids_model_2017.joblib.
-```
-
-### CLI
-
-```bash
-cd nids_xai
-python main.py
-```
-
-Menu: Load & Preprocess → Train → Evaluate → Test & Explain → Classify CSV.
-
----
+For full-data training, download the CIC-IDS CSVs from the [CIC-IDS2017](https://www.unb.ca/cic/datasets/ids-2017.html) or [CIC-IDS2018](https://www.unb.ca/cic/datasets/ids-2018.html) site, put them under `nids_xai/data/raw/CIC-IDS-2017/` or `nids_xai/data/raw/CIC-IDS-2018/`, and select **Full dataset from data/raw**. Model files, processed data and feedback are local and are not included in Git. Older models without a matching preprocessing identity must be retrained.
 
 ## How it works
 
-1. **Preprocessing** (`src/preprocessor.py`) — loads the CSVs in chunks, cleans and
-   converts to numeric, selects the top 25 features with an ANOVA F-test
-   (`SelectKBest(f_classif)`), scales with `StandardScaler`, and makes an 80/20
-   stratified train/test split.
-2. **Detection** (`src/model_trainer.py`) — a Random Forest (100 trees, max depth 15,
-   balanced class weights) classifies each flow as Benign or Attack.
-3. **Explanation** (`src/explainer.py`) — SHAP (TreeExplainer) gives per-feature
-   contributions toward the decision; LIME gives local rules. Both are turned into
-   a plain-English narrative. SHAP contributions sum back to the model output, and
-   agree closely with the model's own feature importances.
-4. **Attack type** (`src/type_trainer.py`) — a second Random Forest names the attack
-   type for flows already flagged as attacks.
-5. **Dashboard** — every classified flow is pushed to the React UI over WebSockets,
-   with KPI metrics, a live alert table, and an on-demand SHAP/LIME explanation panel.
+- Training first splits raw flows into training and holdout sets; feature selection and scaling are fitted on the training split. The binary classifier, a separate attack-type classifier, and an Isolation Forest fitted on benign training flows are saved locally.
+- Dataset replay uses actual feature vectors but not real-time packet capture. It shows binary and attack-type predictions, anomaly indicators, SHAP/LIME explanations when available, a risk score, and the data source.
+- Live capture groups IP packets into bidirectional flows. Per-source windows track contacted ports, connections to common authentication ports, and flow rates; TCP flag counts can trigger an additional heuristic. These are indicators, not proof of an attack. Capture requires Scapy, a suitable interface, and operating-system capture permissions; on Windows it also requires Npcap.
+- The live flow extractor is **not yet validated against CICFlowMeter**. Live ML is disabled by default; unsupported features produce an unclassified event rather than a fabricated prediction. `NIDS_EXPERIMENTAL_LIVE_ML=1` opts into experimental live ML only when every selected feature is present. Even then the feature definitions and units must be independently validated before trusting its output.
+- Risk is the larger of the rule severity and a weighted combination of model attack probability and rule severity. An anomaly-only alert is at least medium risk. These scores and thresholds are heuristic, not calibrated probabilities. An Isolation Forest anomaly means a flow differs from the benign training examples; it does not prove malicious intent.
+- High/critical live alerts invoke prevention. The default `dry_run` records simulated actions; `monitor` logs only. `enforce` uses Linux `iptables` and must be used only inside an isolated lab. Dataset and remote sample replays cannot invoke enforcement. Blocks are temporary and released by the running service, but the in-memory block list is lost if the process exits unexpectedly; inspect and clean the `NIDS_BLOCK` chain in the lab if needed.
+- Feedback is saved locally with the live feature vector and preprocessing identity where available. `python scripts/retrain.py --dataset 2018 --dry-run` checks for usable feedback; omit `--dry-run` to save a separate versioned model and report holdout metrics. Only compatible live samples are used; replay labels are excluded. Review the results before manually loading the model. This workflow does not automatically deploy a model.
 
----
+The API has no authentication. Keep it on localhost or an isolated trusted lab network, especially when using firewall enforcement. `NIDS_ENFORCEMENT_MODE`, `NIDS_BLOCK_TTL`, and `NIDS_IP_WHITELIST` configure prevention. Whitelist all lab management and gateway addresses before experimenting.
 
-## Evaluation metrics
-
-- **Detection (binary):** Accuracy, Precision, Recall (detection rate), F1, ROC-AUC, confusion matrix, and per-attack-type accuracy.
-- **Explanation (faithfulness):** SHAP additivity (contributions reconstruct the prediction), agreement with the model's feature importances, and SHAP–LIME agreement.
-
-Typical results: ~98% accuracy on both datasets; attack-type accuracy 96–99.7%.
-
----
-
-## Testing
+## Verification
 
 ```bash
 cd nids_xai
-pytest tests/ -v
+pip install -r requirements-dev.txt
+python -m pytest -q
+cd ../web
+npm run build
+npx vitest run
 ```
 
-See `docs/TESTING.md` for details.
-
----
-
-## ⚠️ ENFORCE MODE WARNING
-
-> **CAUTION: `enforce` mode calls `iptables` to block source IPs.**
->
-> Only run with `NIDS_ENFORCEMENT_MODE=enforce` inside an **isolated VM or container** (e.g., a dedicated Kali/Ubuntu lab VM with no production traffic). Never use enforce mode on a production host, shared server, or your development machine — it will block legitimate traffic.
->
-> Default mode is `dry_run`, which logs what would be blocked without actually blocking anything.
-
----
-
-## References
-
-- Sharafaldin, I., Lashkari, A. H., & Ghorbani, A. A. (2018). *Toward Generating a New Intrusion Detection Dataset and Intrusion Traffic Characterization.* ICISSP, 108–116.
-- Lundberg, S. M., & Lee, S. I. (2017). *A Unified Approach to Interpreting Model Predictions.* NeurIPS 30.
-- Ribeiro, M. T., Singh, S., & Guestrin, C. (2016). *"Why Should I Trust You?" Explaining the Predictions of Any Classifier.* KDD, 1135–1144.
-- Breiman, L. (2001). *Random Forests.* Machine Learning, 45(1), 5–32.
-
----
-
-## Acknowledgments
-
-- Canadian Institute for Cybersecurity for the CIC-IDS datasets
-- The SHAP, LIME, scikit-learn, FastAPI and React projects
-
-Developed as a Final Year Project for academic purposes.
+See [submission readiness](docs/SUBMISSION_READINESS.md) for the feature-by-feature status, evaluation caveats, and a demonstration checklist. A random flow-level holdout can contain related flows from the same capture; use a separate capture/time period or external dataset for a stronger generalization claim.

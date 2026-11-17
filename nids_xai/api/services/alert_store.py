@@ -27,7 +27,7 @@ class AlertStore:
         if filter_type == "attack":
             items = [a for a in items if a.get("is_attack")]
         elif filter_type == "benign":
-            items = [a for a in items if not a.get("is_attack")]
+            items = [a for a in items if not a.get("is_attack") and a.get("prediction") != "Unclassified"]
         return items[:limit]
 
     def get_by_id(self, alert_id: str) -> Optional[Dict]:
@@ -41,7 +41,9 @@ class AlertStore:
         with self._lock:
             items = list(self._deque)
         attacks = sum(1 for a in items if a.get("is_attack"))
-        return {"total": len(items), "attacks": attacks, "benign": len(items) - attacks}
+        unclassified = sum(1 for a in items if not a.get("is_attack") and a.get("prediction") == "Unclassified")
+        return {"total": len(items), "attacks": attacks, "benign": len(items) - attacks - unclassified,
+                "unclassified": unclassified}
 
     def clear(self) -> int:
         """Empty the buffer. Returns number of alerts removed."""
